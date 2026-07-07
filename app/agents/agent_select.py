@@ -16,7 +16,7 @@ SYSTEM_PROMPT = (
 def run(
     issue_statement: str, patch_contents: list[str]
 ) -> tuple[int, str, MessageThread]:
-    model = common.MODEL_HUB["gpt-4-0125-preview"]
+    model = common.SELECTED_MODEL
     model.setup()
 
     prefix_thread = MessageThread()

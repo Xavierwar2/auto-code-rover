@@ -180,7 +180,9 @@ def get_final_patch_path(individual_expr_dir: str) -> str | None:
     on the patch extraction history.
     """
     best_status, best_file = read_extract_status(individual_expr_dir)
-    return None if best_status == ExtractStatus.NO_PATCH else str(best_file)
+    if best_status == ExtractStatus.NO_PATCH or not best_file:
+        return None
+    return str(best_file) if Path(best_file).is_file() else None
 
 
 def extract_diff_one_instance(

@@ -28,6 +28,7 @@ def register_all_models() -> None:
     common.register_model(gpt.Gpt4_0613())
     common.register_model(gpt.Gpt_o1mini())
     common.register_model(gpt.Gpt_o1())
+    common.register_model(gpt.Gpt54())
 
     common.register_model(claude.Claude3Opus())
     common.register_model(claude.Claude3Sonnet())

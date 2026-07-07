@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from app.inference import *
-from app.task import Task
+from app.task import PlainTask, Task
 from app import config
 
 from test.pytest_utils import *  # Import shared test utilities
@@ -152,6 +152,29 @@ def test_run_one_task(monkeypatch, tmp_path):
     assert result is True
 
 
+def test_run_one_task_returns_false_when_no_patch_selected(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "overall_retry_limit", 1)
+    monkeypatch.setattr("app.inference.set_model", lambda model_name: None)
+    monkeypatch.setattr(
+        "app.inference._run_one_task", lambda out_dir, api_manager, issue_stmt: False
+    )
+
+    dummy_task = DummyTask(
+        project_path=str(tmp_path / "dummy_project"), issue="dummy issue"
+    )
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    result = run_one_task(dummy_task, str(output_dir), ["dummy_model"])
+
+    selected_patch_file = Path(output_dir) / "selected_patch.json"
+    assert selected_patch_file.exists()
+    data = json.loads(selected_patch_file.read_text())
+    assert data["selected_patch"] is None
+    assert data["reason"] == "no-patch"
+    assert result is False
+
+
 ###############################################################################
 # Test select_patch
 ###############################################################################
@@ -181,3 +204,28 @@ def test_select_patch(monkeypatch, tmp_path):
     selected_patch, details = select_patch(dummy_task, str(output_dir))
     assert "reviewer-approved" in details["reason"]
     assert isinstance(selected_patch, str)
+
+
+def test_select_patch_returns_no_patch_when_no_extracted_patches(tmp_path):
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    dummy_task = DummyTask(
+        project_path=str(tmp_path / "dummy_project"), issue="dummy issue"
+    )
+
+    selected_patch, details = select_patch(dummy_task, str(output_dir))
+
+    assert selected_patch == ""
+    assert details["selected_patch"] is None
+    assert details["reason"] == "no-patch"
+
+
+def test_supports_python_reproducer_skips_non_python_plain_task(tmp_path):
+    task = PlainTask(
+        commit_hash="abc123",
+        local_path=str(tmp_path),
+        problem_statement="dummy issue",
+        language="typescript",
+    )
+
+    assert supports_python_reproducer(task) is False

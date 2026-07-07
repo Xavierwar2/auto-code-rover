@@ -302,8 +302,8 @@ Prepare a directory where ACR can clone target repositories:
 mkdir multi-swe-repos
 ```
 
-By default, ACR clones missing repositories from GitHub into `--repo-dir` using the directory name `<org>__<repo>`, for example `multi-swe-repos/darkreader__darkreader`.
-If you already cloned the repositories yourself, place them under that naming convention and pass `--no-clone`.
+By default, ACR clones missing repositories from GitHub into `--repo-dir` using the directory layout `<org>/<repo>`, for example `multi-swe-repos/darkreader/darkreader`.
+If you already cloned the repositories yourself, place them under that naming convention and pass `--no-clone`. The older `<org>__<repo>` layout is still accepted for existing local checkouts.
 
 #### Run a single task in Multi-SWE-bench
 
@@ -312,40 +312,42 @@ The following example runs one TypeScript task from the `darkreader` dataset:
 ```
 cd <AutoCodeRover-path>
 conda activate auto-code-rover
-PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-4o-2024-05-13 --output-dir output-multi-swe --dataset-file <Multi-SWE-bench-path>/ts/darkreader__darkreader_dataset.jsonl --repo-dir multi-swe-repos --task darkreader__darkreader-7241
+PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-5.4 --output-dir results/acr_darkreader_test --dataset-file <Multi-SWE-bench-path>/data/ts/darkreader__darkreader_dataset.jsonl --repo-dir <Multi-SWE-bench-path>/data/repos --task darkreader__darkreader-7241 --test-cmd "npm test"
 ```
 
-If the repository already exists at `multi-swe-repos/darkreader__darkreader`, run:
+For Multi-SWE-bench datasets under directories such as `ts/`, `js/`, or `py/`, ACR infers the primary language and includes it in the patch-generation prompt. You can override this with `--language typescript`, `--language javascript`, or another language name. If you pass `--test-cmd`, ACR can use that command for optional plain-task validation.
+
+If the repository already exists at `<Multi-SWE-bench-path>/data/repos/darkreader/darkreader`, run:
 
 ```
-PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-4o-2024-05-13 --output-dir output-multi-swe --dataset-file <Multi-SWE-bench-path>/ts/darkreader__darkreader_dataset.jsonl --repo-dir multi-swe-repos --task darkreader__darkreader-7241 --no-clone
+PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-5.4 --output-dir results/acr_darkreader_test --dataset-file <Multi-SWE-bench-path>/data/ts/darkreader__darkreader_dataset.jsonl --repo-dir <Multi-SWE-bench-path>/data/repos --task darkreader__darkreader-7241 --no-clone --test-cmd "npm test"
 ```
 
 #### Run multiple tasks in Multi-SWE-bench
 
-Put instance ids into a file, one per line:
+Put task ids into a file. ACR accepts Multi-SWE test case ids such as `org/repo:pr-number`, regular instance ids, or JSONL records with `instance_id`:
 
 ```
-darkreader__darkreader-7241
-darkreader__darkreader-6747
+darkreader/darkreader:pr-7241
+darkreader/darkreader:pr-6747
 ```
 
 Then run:
 
 ```
-PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-4o-2024-05-13 --output-dir output-multi-swe --dataset-file <Multi-SWE-bench-path>/ts/darkreader__darkreader_dataset.jsonl --repo-dir multi-swe-repos --task-list-file tasks.txt
+PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-5.4 --output-dir results/acr_darkreader_test --dataset-file <Multi-SWE-bench-path>/data/ts/darkreader__darkreader_dataset.jsonl --repo-dir <Multi-SWE-bench-path>/data/repos --task-list-file test/test_cases/test_cases_darkreader.jsonl
 ```
 
-You can also filter a dataset file by repository:
+You can also use the helper script with Chinese parameter comments:
 
 ```
-PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-4o-2024-05-13 --output-dir output-multi-swe --dataset-file <Multi-SWE-bench-path>/ts/darkreader__darkreader_dataset.jsonl --repo-dir multi-swe-repos --org darkreader --repo darkreader
+bash scripts/run_multi_swe_bench.sh
 ```
 
 After the run finishes, ACR post-processes generated patches and writes:
 
 ```
-output-multi-swe/predictions_for_multi_swe_bench.jsonl
+results/acr_darkreader_test/predictions_for_multi_swe_bench.jsonl
 ```
 
 Each JSONL row has the format expected by Multi-SWE-bench:

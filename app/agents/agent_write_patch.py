@@ -50,7 +50,7 @@ Return the patch in the format below.
 Within `<file></file>`, replace `...` with actual file path.
 Within `<original></original>`, replace `...` with the original code snippet from the program.
 Within `<patched></patched>`, replace `...` with the fixed version of the original code.
-When adding orignal code and updated code, pay attention to indentation, as the code is in Python.
+When adding original code and updated code, pay attention to indentation and syntax.
 You can write multiple modifications if needed.
 
 Example format:
@@ -78,6 +78,16 @@ NOTE:
 This original code snippet MUST match exactly to a continuous block of code in the original program,
 since the system will use this to locate the code to be modified.
 """
+
+
+def get_patch_prompt(language: str | None = None) -> str:
+    language_note = ""
+    if language:
+        language_note = (
+            f"\nThe target project is written primarily in {language}. "
+            "Use that language's syntax and project conventions when writing the patch.\n"
+        )
+    return USER_PROMPT_INIT + language_note
 
 
 PatchHandle: TypeAlias = str
@@ -183,10 +193,10 @@ class PatchAgent:
             for feedback in feedbacks:
                 thread.add_user(feedback)
 
-        thread.add_user(USER_PROMPT_INIT)
+        thread.add_user(get_patch_prompt(getattr(self.task, "language", None)))
 
         if not history_handles:
-            print_acr(USER_PROMPT_INIT)
+            print_acr(get_patch_prompt(getattr(self.task, "language", None)))
 
         patch_resp, *_ = common.SELECTED_MODEL.call(thread.to_msg())
         thread.add_model(patch_resp)
@@ -268,8 +278,8 @@ def generator(
     new_thread = agent_common.replace_system_prompt(new_thread, SYSTEM_PROMPT)
 
     # (2) add the initial user prompt
-    new_thread.add_user(USER_PROMPT_INIT)
-    print_acr(USER_PROMPT_INIT, "patch generation")
+    new_thread.add_user(get_patch_prompt())
+    print_acr(get_patch_prompt(), "patch generation")
 
     index = 1
     while True:
@@ -306,7 +316,7 @@ def generator(
 
             assert validation_msg is not None
 
-            new_prompt = f"Your patch is invalid. {validation_msg}. Please try again:\n\n{USER_PROMPT_INIT}"
+            new_prompt = f"Your patch is invalid. {validation_msg}. Please try again:\n\n{get_patch_prompt()}"
         else:
             _ = yield False, "failed to write an applicable patch", ""
 

@@ -89,8 +89,8 @@ def test_raw_swe_task_to_task_and_dump_meta(tmp_path, dummy_swe_task_data):
 def test_raw_multi_swe_task_to_task_and_dump_meta(tmp_path):
     repo_dir = tmp_path / "repos"
     repo_dir.mkdir()
-    repo_path = repo_dir / "darkreader__darkreader"
-    repo_path.mkdir()
+    repo_path = repo_dir / "darkreader" / "darkreader"
+    repo_path.mkdir(parents=True)
     instance = {
         "org": "darkreader",
         "repo": "darkreader",
@@ -107,7 +107,13 @@ def test_raw_multi_swe_task_to_task_and_dump_meta(tmp_path):
         "hints": "hint text",
     }
 
-    raw_task = RawMultiSweTask(instance, str(repo_dir), clone=False)
+    raw_task = RawMultiSweTask(
+        instance,
+        str(repo_dir),
+        clone=False,
+        language="typescript",
+        test_cmd="npm test",
+    )
     assert raw_task.task_id == "darkreader__darkreader-7241"
     assert "Fix parser" in raw_task.problem_statement
     assert "Bug body" in raw_task.problem_statement
@@ -117,6 +123,8 @@ def test_raw_multi_swe_task_to_task_and_dump_meta(tmp_path):
     assert isinstance(task_obj, PlainTask)
     assert task_obj.commit_hash == "abc123"
     assert task_obj.local_path == str(repo_path)
+    assert task_obj.language == "typescript"
+    assert task_obj.test_cmd == "npm test"
 
     output_dir = tmp_path / "multi_swe_output"
     output_dir.mkdir()
@@ -124,6 +132,8 @@ def test_raw_multi_swe_task_to_task_and_dump_meta(tmp_path):
 
     meta = json.loads((output_dir / "meta.json").read_text())
     assert meta["task_id"] == "darkreader__darkreader-7241"
+    assert meta["setup_info"]["language"] == "typescript"
+    assert meta["setup_info"]["test_cmd"] == "npm test"
     assert meta["multi_swe_info"] == {
         "org": "darkreader",
         "repo": "darkreader",
@@ -131,6 +141,27 @@ def test_raw_multi_swe_task_to_task_and_dump_meta(tmp_path):
         "instance_id": "darkreader__darkreader-7241",
     }
     assert (output_dir / "developer_patch.diff").read_text() == instance["fix_patch"]
+
+
+def test_raw_multi_swe_task_accepts_legacy_repo_path(tmp_path):
+    repo_dir = tmp_path / "repos"
+    repo_dir.mkdir()
+    legacy_repo_path = repo_dir / "darkreader__darkreader"
+    legacy_repo_path.mkdir()
+    instance = {
+        "org": "darkreader",
+        "repo": "darkreader",
+        "number": 7241,
+        "title": "Fix parser",
+        "body": "Bug body",
+        "base": {"sha": "abc123"},
+        "fix_patch": "",
+        "instance_id": "darkreader__darkreader-7241",
+    }
+
+    raw_task = RawMultiSweTask(instance, str(repo_dir), clone=False)
+
+    assert raw_task.repo_path == str(legacy_repo_path)
 
 
 ###############################################################################

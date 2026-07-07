@@ -75,6 +75,38 @@ def test_plain_task_getters_and_reset(monkeypatch, tmp_path):
         task.validate("dummy patch")
 
 
+def test_plain_task_validate_runs_test_command(monkeypatch, tmp_path):
+    local_dir = tmp_path / "plain_project"
+    local_dir.mkdir()
+    task = PlainTask(
+        commit_hash="dummy_commit",
+        local_path=str(local_dir),
+        problem_statement="dummy problem",
+        language="typescript",
+        test_cmd="npm test",
+    )
+
+    monkeypatch.setattr(task, "apply_patch", lambda patch: contextlib.nullcontext())
+
+    def fake_run(cmd, shell, cwd, capture_output, text):
+        assert cmd == "npm test"
+        assert shell is True
+        assert cwd == str(local_dir)
+        assert capture_output is True
+        assert text is True
+        return CompletedProcess(cmd, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    passed, msg, log_file, orig_log_file = task.validate("patch")
+
+    assert passed is True
+    assert msg == ""
+    assert log_file != orig_log_file
+    assert "STDOUT:\nok" in Path(log_file).read_text()
+    assert "did not run a baseline" in Path(orig_log_file).read_text()
+
+
 # -----------------------------------------------------------------------------
 # Fixture: Create a dummy SweTask instance
 # -----------------------------------------------------------------------------

@@ -69,7 +69,7 @@ class OpenaiModel(Model):
         """
         if self.client is None:
             key = self.check_api_key()
-            self.client = OpenAI(api_key=key)
+            self.client = OpenAI(base_url=os.getenv("OPENAI_API_BASE_URL", None), api_key=key)
 
     def check_api_key(self) -> str:
         key = os.getenv("OPENAI_KEY")
@@ -407,3 +407,8 @@ class Gpt4_0613(OpenaiModel):
 class Gpt4o_mini_20240718(OpenaiModel):
     def __init__(self):
         super().__init__("gpt-4o-mini-2024-07-18", 4096, 0.00000015, 0.0000006)
+
+class Gpt54(OpenaiModel):
+    def __init__(self):
+        super().__init__("gpt-5.4", 16384, 0.0, 0.0, parallel_tool_call=True)
+        self.note = "GPT-5.4 model id. Pricing is not configured."

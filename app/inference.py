@@ -22,7 +22,7 @@ from app.data_structures import BugLocation
 from app.log import print_banner, print_issue
 from app.manage import ProjectApiManager
 from app.model.common import set_model
-from app.task import Task
+from app.task import PlainTask, Task
 
 
 def write_patch_iterative_with_review(
@@ -136,6 +136,10 @@ def run_one_task(task: Task, output_dir: str, model_names: Iterable[str]) -> boo
     selected, details = select_patch(task, output_dir)
     Path(output_dir, "selected_patch.json").write_text(json.dumps(details, indent=4))
 
+    if not selected:
+        logger.info("No patch selected. Reason: {}", details["reason"])
+        return False
+
     logger.info("Selected patch {}. Reason: {}", selected, details["reason"])
 
     return True
@@ -144,6 +148,13 @@ def run_one_task(task: Task, output_dir: str, model_names: Iterable[str]) -> boo
 def select_patch(task: Task, output_dir: str | PathLike) -> tuple[str, dict]:
 
     patches = natsorted(list(Path(output_dir).glob("**/extracted_patch_*.diff")))
+    if not patches:
+        logger.warning("No extracted patches found under {}", output_dir)
+        return "", {
+            "selected_patch": None,
+            "reason": "no-patch",
+            "agent_comment": "No extracted_patch_*.diff files were found.",
+        }
 
     # TODO: These candidate patches must have been dismissed by reviewer. Maybe an
     # assertion should be added to confirm this.
@@ -272,27 +283,35 @@ def _run_one_task(
     repro_stderr = ""
     reproduced = False
     reproduced_test_content = None
-    try:
-        test_handle, test_content, orig_repro_result = (
-            test_agent.write_reproducing_test_without_feedback()
-        )
-        test_agent.save_test(test_handle)
+    if supports_python_reproducer(api_manager.task):
+        try:
+            test_handle, test_content, orig_repro_result = (
+                test_agent.write_reproducing_test_without_feedback()
+            )
+            test_agent.save_test(test_handle)
 
-        coord = (PatchAgent.EMPTY_PATCH_HANDLE, test_handle)
-        repro_result_map[coord] = orig_repro_result
+            coord = (PatchAgent.EMPTY_PATCH_HANDLE, test_handle)
+            repro_result_map[coord] = orig_repro_result
 
-        if orig_repro_result.reproduced:
-            repro_stderr = orig_repro_result.stderr
-            reproduced = True
-            reproduced_test_content = test_content
-        # TODO: utilize the test for localization
-    except NoReproductionStep:
+            if orig_repro_result.reproduced:
+                repro_stderr = orig_repro_result.stderr
+                reproduced = True
+                reproduced_test_content = test_content
+            # TODO: utilize the test for localization
+        except NoReproductionStep:
+            logger.info(
+                "Test agent decides that the issue statement does not contain "
+                "reproduction steps; skipping reproducer tracing"
+            )
+        except InvalidLLMResponse:
+            logger.warning(
+                "Failed to write a reproducer test; skipping reproducer tracing"
+            )
+    else:
         logger.info(
-            "Test agent decides that the issue statement does not contain "
-            "reproduction steps; skipping reproducer tracing"
+            "Skipping Python reproducer tracing for {} task",
+            getattr(api_manager.task, "language", "non-Python"),
         )
-    except InvalidLLMResponse:
-        logger.warning("Failed to write a reproducer test; skipping reproducer tracing")
 
     if config.enable_sbfl:
         sbfl_result, *_ = api_manager.fault_localization()
@@ -338,6 +357,13 @@ def _run_one_task(
         "Invoked write_patch. Since there is no reproducer, the workflow will be terminated."
     )
     return result
+
+
+def supports_python_reproducer(task: Task) -> bool:
+    if not isinstance(task, PlainTask):
+        return True
+    language = (task.language or "").lower()
+    return language in {"", "python", "py"}
 
 
 if __name__ == "__main__":

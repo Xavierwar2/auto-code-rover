@@ -140,6 +140,8 @@ def main():
             args.org,
             args.repo,
             not args.no_clone,
+            args.language,
+            args.test_cmd,
         )
         groups = group_multi_swe_tasks_by_repo(tasks)
         run_task_groups(groups, num_processes, organize_output="multi-swe-bench")
@@ -243,6 +245,16 @@ def set_multi_swe_parser_args(parser: ArgumentParser) -> None:
         action="store_true",
         default=False,
         help="Do not clone missing repositories; require them to exist in --repo-dir.",
+    )
+    parser.add_argument(
+        "--language",
+        type=str,
+        help="Primary language for generated patches, e.g. typescript, javascript, python.",
+    )
+    parser.add_argument(
+        "--test-cmd",
+        type=str,
+        help="Optional command used to validate generated patches for plain/Multi-SWE tasks.",
     )
 
 
@@ -413,6 +425,8 @@ def make_multi_swe_tasks(
     org: str | None,
     repo: str | None,
     clone: bool = True,
+    language: str | None = None,
+    test_cmd: str | None = None,
 ) -> list[RawMultiSweTask]:
     if task_id is not None and task_list_file is not None:
         raise ValueError("Cannot specify both task and task-list.")
@@ -442,20 +456,73 @@ def make_multi_swe_tasks(
     if not filtered_instances:
         raise ValueError("No Multi-SWE-bench instances matched the filters.")
 
+    inferred_language = language or infer_multi_swe_language(dataset_file)
+
     return [
-        RawMultiSweTask(instance, repo_dir=repo_dir, clone=clone)
+        RawMultiSweTask(
+            instance,
+            repo_dir=repo_dir,
+            clone=clone,
+            language=inferred_language,
+            test_cmd=test_cmd,
+        )
         for instance in filtered_instances
     ]
+
+
+def infer_multi_swe_language(dataset_file: str) -> str | None:
+    language_by_dir = {
+        "ts": "typescript",
+        "typescript": "typescript",
+        "js": "javascript",
+        "javascript": "javascript",
+        "py": "python",
+        "python": "python",
+    }
+    for part in reversed(Path(dataset_file).parts):
+        language = language_by_dir.get(part.lower())
+        if language:
+            return language
+    return None
 
 
 def parse_task_list_file(task_list_file: str) -> list[str]:
     """
     Parse the task list file.
-    The file should contain one task/instance id per line, without other characters.
+    Supported line formats:
+    - task/instance id, e.g. django__django-11133 or darkreader__darkreader-7241
+    - Multi-SWE test case id, e.g. darkreader/darkreader:pr-7241
+    - JSONL object with an instance_id field
     """
-    with open(task_list_file) as f:
-        task_ids = f.readlines()
-    return [x.strip() for x in task_ids]
+    task_ids = []
+    with open(task_list_file, encoding="utf-8") as f:
+        for line in f:
+            entry = parse_task_list_entry(line)
+            if entry:
+                task_ids.append(entry)
+    return task_ids
+
+
+def parse_task_list_entry(line: str) -> str | None:
+    line = line.strip()
+    if not line:
+        return None
+
+    if line.startswith("{"):
+        data = json.loads(line)
+        if "instance_id" in data:
+            return data["instance_id"]
+        if {"org", "repo", "number"} <= data.keys():
+            return f"{data['org']}__{data['repo']}-{data['number']}"
+        raise ValueError(f"Unsupported JSONL task entry: {line}")
+
+    if "/" in line and ":" in line:
+        repo_part, case_part = line.split(":", 1)
+        org, repo = repo_part.split("/", 1)
+        number = case_part.removeprefix("pr-")
+        return f"{org}__{repo}-{number}"
+
+    return line
 
 
 def group_swe_tasks_by_env(tasks: list[RawSweTask]) -> dict[str, list[RawSweTask]]:

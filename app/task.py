@@ -507,6 +507,8 @@ class PlainTask(Task):
     commit_hash: str
     local_path: str
     problem_statement: str
+    language: str | None = None
+    test_cmd: str | None = None
 
     @property
     def project_path(self) -> str:
@@ -524,4 +526,22 @@ class PlainTask(Task):
         return self.problem_statement
 
     def validate(self, patch_content: str) -> tuple[bool, str, str, str]:
-        raise NotImplementedError("Cannot do validation for live issues for now")
+        if not self.test_cmd:
+            raise NotImplementedError("Cannot validate this task without a test command")
+
+        with self.apply_patch(patch_content):
+            _, log_file = mkstemp(suffix=".log", prefix="plainval-", text=True)
+            _, orig_log_file = mkstemp(suffix=".log", prefix="plainval-orig-", text=True)
+            cp = subprocess.run(
+                self.test_cmd,
+                shell=True,
+                cwd=self.project_path,
+                capture_output=True,
+                text=True,
+            )
+
+        log_content = f"STDOUT:\n{cp.stdout}\n\nSTDERR:\n{cp.stderr}"
+        Path(log_file).write_text(log_content)
+        Path(orig_log_file).write_text("PlainTask validation did not run a baseline command.")
+        msg = "" if cp.returncode == 0 else log_content
+        return cp.returncode == 0, msg, log_file, orig_log_file

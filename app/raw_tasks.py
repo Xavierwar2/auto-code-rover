@@ -91,7 +91,14 @@ class RawMultiSweTask(RawTask):
     plain issue workflow because ACR's SWE-bench validation stack is Python-only.
     """
 
-    def __init__(self, instance: dict, repo_dir: str, clone: bool = True):
+    def __init__(
+        self,
+        instance: dict,
+        repo_dir: str,
+        clone: bool = True,
+        language: str | None = None,
+        test_cmd: str | None = None,
+    ):
         self.instance = instance
         self.repo_dir = repo_dir
         self._task_id = instance["instance_id"]
@@ -99,11 +106,21 @@ class RawMultiSweTask(RawTask):
         self.repo = instance["repo"]
         self.number = instance["number"]
         self.base_commit = instance["base"]["sha"]
-        self.repo_path = pjoin(repo_dir, f"{self.org}__{self.repo}")
+        self.language = language or instance.get("language")
+        self.test_cmd = test_cmd or instance.get("test_cmd")
+        self.repo_path = pjoin(repo_dir, self.org, self.repo)
+        self.legacy_repo_path = pjoin(repo_dir, f"{self.org}__{self.repo}")
         self.problem_statement = self.make_problem_statement(instance)
         if clone:
             self.ensure_repo()
         elif not Path(self.repo_path).exists():
+            if Path(self.legacy_repo_path).exists():
+                log_and_print(
+                    f"Repository {self.repo_path} does not exist; using legacy path "
+                    f"{self.legacy_repo_path}."
+                )
+                self.repo_path = self.legacy_repo_path
+                return
             raise FileNotFoundError(
                 f"Repository {self.repo_path} does not exist and cloning is disabled."
             )
@@ -137,7 +154,7 @@ class RawMultiSweTask(RawTask):
         if repo_path.exists():
             return
         clone_link = f"https://github.com/{self.org}/{self.repo}.git"
-        app_utils.clone_repo(clone_link, self.repo_dir, repo_path.name)
+        app_utils.clone_repo(clone_link, str(repo_path.parent), repo_path.name)
         log_and_print(f"Cloned source code to {repo_path}.")
 
     def dump_meta_data(self, output_dir: str):
@@ -151,6 +168,8 @@ class RawMultiSweTask(RawTask):
             },
             "setup_info": {
                 "repo_path": self.repo_path,
+                "language": self.language,
+                "test_cmd": self.test_cmd,
             },
             "multi_swe_info": {
                 "org": self.org,
@@ -177,6 +196,8 @@ class RawMultiSweTask(RawTask):
             commit_hash=self.base_commit,
             local_path=self.repo_path,
             problem_statement=self.problem_statement,
+            language=self.language,
+            test_cmd=self.test_cmd,
         )
 
 
