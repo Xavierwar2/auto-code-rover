@@ -139,11 +139,12 @@ Similarly, set `OPENAI_KEY` or `ANTHROPIC_API_KEY` in your shell before running 
 
 ## Running AutoCodeRover
 
-You can run AutoCodeRover in three modes:
+You can run AutoCodeRover in four modes:
 
 1. GitHub issue mode: Run ACR on a live GitHub issue by providing a link to the issue page.
 2. Local issue mode: Run ACR on a local repository and a file containing the issue description.
 3. SWE-bench mode: Run ACR on SWE-bench task instances. (local setup of ACR recommend.)
+4. Multi-SWE-bench mode: Run ACR on Multi-SWE-bench JSONL task instances and produce Multi-SWE-bench prediction JSONL.
 
 ### [GitHub issue mode] Set up and run on new GitHub issues
 
@@ -281,6 +282,79 @@ A config file can be used by:
 ```
 python scripts/run.py conf/example.conf
 ```
+
+### [Multi-SWE-bench mode] Set up and run on Multi-SWE-bench tasks
+
+This mode is for running ACR on [Multi-SWE-bench](https://github.com/multi-swe-bench/multi-swe-bench) JSONL task files.
+Unlike SWE-bench mode, it does not use the Python SWE-bench setup maps or SWE-bench Docker validation stack. ACR treats each instance as a local issue task: it checks out the repository at the instance's `base.sha`, generates a patch, and writes predictions in the Multi-SWE-bench evaluation format.
+
+#### Set up
+
+Download or clone the Multi-SWE-bench dataset. For example, the TypeScript `darkreader` dataset file is available at:
+
+```
+ts/darkreader__darkreader_dataset.jsonl
+```
+
+Prepare a directory where ACR can clone target repositories:
+
+```
+mkdir multi-swe-repos
+```
+
+By default, ACR clones missing repositories from GitHub into `--repo-dir` using the directory name `<org>__<repo>`, for example `multi-swe-repos/darkreader__darkreader`.
+If you already cloned the repositories yourself, place them under that naming convention and pass `--no-clone`.
+
+#### Run a single task in Multi-SWE-bench
+
+The following example runs one TypeScript task from the `darkreader` dataset:
+
+```
+cd <AutoCodeRover-path>
+conda activate auto-code-rover
+PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-4o-2024-05-13 --output-dir output-multi-swe --dataset-file <Multi-SWE-bench-path>/ts/darkreader__darkreader_dataset.jsonl --repo-dir multi-swe-repos --task darkreader__darkreader-7241
+```
+
+If the repository already exists at `multi-swe-repos/darkreader__darkreader`, run:
+
+```
+PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-4o-2024-05-13 --output-dir output-multi-swe --dataset-file <Multi-SWE-bench-path>/ts/darkreader__darkreader_dataset.jsonl --repo-dir multi-swe-repos --task darkreader__darkreader-7241 --no-clone
+```
+
+#### Run multiple tasks in Multi-SWE-bench
+
+Put instance ids into a file, one per line:
+
+```
+darkreader__darkreader-7241
+darkreader__darkreader-6747
+```
+
+Then run:
+
+```
+PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-4o-2024-05-13 --output-dir output-multi-swe --dataset-file <Multi-SWE-bench-path>/ts/darkreader__darkreader_dataset.jsonl --repo-dir multi-swe-repos --task-list-file tasks.txt
+```
+
+You can also filter a dataset file by repository:
+
+```
+PYTHONPATH=. python app/main.py multi-swe-bench --model gpt-4o-2024-05-13 --output-dir output-multi-swe --dataset-file <Multi-SWE-bench-path>/ts/darkreader__darkreader_dataset.jsonl --repo-dir multi-swe-repos --org darkreader --repo darkreader
+```
+
+After the run finishes, ACR post-processes generated patches and writes:
+
+```
+output-multi-swe/predictions_for_multi_swe_bench.jsonl
+```
+
+Each JSONL row has the format expected by Multi-SWE-bench:
+
+```
+{"org": "darkreader", "repo": "darkreader", "number": 7241, "fix_patch": "diff --git ..."}
+```
+
+Use this file as the patch input to the Multi-SWE-bench evaluation harness.
 
 ### Using a different model
 

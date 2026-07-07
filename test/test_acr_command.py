@@ -10,7 +10,9 @@ import openai
 call_tracker = {
     "fake_run_one_task": 0,
     "make_swe_tasks": 0,
+    "make_multi_swe_tasks": 0,
     "group_swe_tasks_by_env": 0,
+    "group_multi_swe_tasks_by_repo": 0,
     "RawGithubTask": 0,
     "RawLocalTask": 0,
 }
@@ -50,9 +52,21 @@ def fake_make_swe_tasks(task, task_list_file, setup_map_file, tasks_map_file):
     return [DummyTask()]
 
 
+def fake_make_multi_swe_tasks(
+    dataset_file, repo_dir, task, task_list_file, org, repo, clone
+):
+    call_tracker["make_multi_swe_tasks"] += 1
+    return [DummyTask()]
+
+
 def fake_group_swe_tasks_by_env(tasks):
     call_tracker["group_swe_tasks_by_env"] += 1
     return {"dummy_env": tasks}
+
+
+def fake_group_multi_swe_tasks_by_repo(tasks):
+    call_tracker["group_multi_swe_tasks_by_repo"] += 1
+    return {"dummy_repo": tasks}
 
 
 def fake_RawGithubTask(*args, **kwargs):
@@ -74,6 +88,15 @@ def fake_organize_and_form_input(output_dir):
     return str(output_file)
 
 
+def fake_organize_and_form_multi_swe_input(output_dir):
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    output_file = out_dir / "multi_swe_input.jsonl"
+    content = '{"org": "dummy", "repo": "repo", "number": 1, "fix_patch": "diff"}\n'
+    output_file.write_text(content)
+    return str(output_file)
+
+
 # --- Pytest Fixtures ---
 
 
@@ -84,7 +107,9 @@ def reset_call_tracker_fixture():
         {
             "fake_run_one_task": 0,
             "make_swe_tasks": 0,
+            "make_multi_swe_tasks": 0,
             "group_swe_tasks_by_env": 0,
+            "group_multi_swe_tasks_by_repo": 0,
             "RawGithubTask": 0,
             "RawLocalTask": 0,
         }
@@ -98,7 +123,15 @@ def patch_functions(monkeypatch):
     # Patch functions that create tasks and perform grouping.
     monkeypatch.setattr(main_module, "make_swe_tasks", fake_make_swe_tasks)
     monkeypatch.setattr(
+        main_module, "make_multi_swe_tasks", fake_make_multi_swe_tasks
+    )
+    monkeypatch.setattr(
         main_module, "group_swe_tasks_by_env", fake_group_swe_tasks_by_env
+    )
+    monkeypatch.setattr(
+        main_module,
+        "group_multi_swe_tasks_by_repo",
+        fake_group_multi_swe_tasks_by_repo,
     )
     # Leave run_task_groups unpatched so its post‐processing branch runs.
     # Patch task constructors for github and local issue commands.
@@ -107,6 +140,11 @@ def patch_functions(monkeypatch):
     # Patch the post-processing function that creates the SWE input file.
     monkeypatch.setattr(
         main_module, "organize_and_form_input", fake_organize_and_form_input
+    )
+    monkeypatch.setattr(
+        main_module,
+        "organize_and_form_multi_swe_input",
+        fake_organize_and_form_multi_swe_input,
     )
 
 
@@ -169,6 +207,45 @@ def test_main_swe_bench(tmp_path):
     assert (
         content == "dummy input content"
     ), "Output file content does not match expected content."
+
+
+def test_main_multi_swe_bench(tmp_path):
+    dataset_file = tmp_path / "darkreader.jsonl"
+    dataset_file.write_text('{"instance_id": "darkreader__darkreader-7241"}\n')
+    repo_dir = tmp_path / "repos"
+    repo_dir.mkdir()
+    output_dir = tmp_path / "output"
+
+    sys.argv = [
+        "main.py",
+        "multi-swe-bench",
+        "--output-dir",
+        str(output_dir),
+        "--model",
+        "gpt-3.5-turbo-0125",
+        "--model-temperature",
+        "0.0",
+        "--conv-round-limit",
+        "15",
+        "--num-processes",
+        "1",
+        "--dataset-file",
+        str(dataset_file),
+        "--repo-dir",
+        str(repo_dir),
+        "--task",
+        "darkreader__darkreader-7241",
+        "--no-clone",
+    ]
+
+    main_module.main()
+
+    assert call_tracker["make_multi_swe_tasks"] == 1
+    assert call_tracker["group_multi_swe_tasks_by_repo"] == 1
+
+    multi_swe_input_file = output_dir / "multi_swe_input.jsonl"
+    assert multi_swe_input_file.exists()
+    assert '"fix_patch": "diff"' in multi_swe_input_file.read_text()
 
 
 def test_github_issue(tmp_path):

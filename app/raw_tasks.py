@@ -82,6 +82,104 @@ class RawSweTask(RawTask):
             f.write(self.task_info["patch"])
 
 
+class RawMultiSweTask(RawTask):
+    """
+    Encapsulate one Multi-SWE-bench instance.
+
+    Multi-SWE-bench ships tasks as JSONL records and expects predictions as JSONL
+    records with org/repo/number/fix_patch fields. The task itself can use the
+    plain issue workflow because ACR's SWE-bench validation stack is Python-only.
+    """
+
+    def __init__(self, instance: dict, repo_dir: str, clone: bool = True):
+        self.instance = instance
+        self.repo_dir = repo_dir
+        self._task_id = instance["instance_id"]
+        self.org = instance["org"]
+        self.repo = instance["repo"]
+        self.number = instance["number"]
+        self.base_commit = instance["base"]["sha"]
+        self.repo_path = pjoin(repo_dir, f"{self.org}__{self.repo}")
+        self.problem_statement = self.make_problem_statement(instance)
+        if clone:
+            self.ensure_repo()
+        elif not Path(self.repo_path).exists():
+            raise FileNotFoundError(
+                f"Repository {self.repo_path} does not exist and cloning is disabled."
+            )
+
+    @property
+    def task_id(self) -> str:
+        return self._task_id
+
+    @staticmethod
+    def make_problem_statement(instance: dict) -> str:
+        parts = [
+            f"Title: {instance.get('title', '')}".strip(),
+            "",
+            instance.get("body") or "",
+        ]
+        resolved_issues = instance.get("resolved_issues") or []
+        if resolved_issues:
+            parts.append("\nResolved issues:")
+            for issue in resolved_issues:
+                issue_title = issue.get("title", "")
+                issue_body = issue.get("body") or ""
+                issue_number = issue.get("number", "")
+                parts.append(f"\nIssue #{issue_number}: {issue_title}\n{issue_body}")
+        hints = instance.get("hints") or ""
+        if hints:
+            parts.append(f"\nHints:\n{hints}")
+        return "\n".join(parts).strip()
+
+    def ensure_repo(self) -> None:
+        repo_path = Path(self.repo_path)
+        if repo_path.exists():
+            return
+        clone_link = f"https://github.com/{self.org}/{self.repo}.git"
+        app_utils.clone_repo(clone_link, self.repo_dir, repo_path.name)
+        log_and_print(f"Cloned source code to {repo_path}.")
+
+    def dump_meta_data(self, output_dir: str):
+        meta = {
+            "task_id": self.task_id,
+            "task_info": {
+                "base_commit": self.base_commit,
+                "problem_statement": self.problem_statement,
+                "instance_id": self.task_id,
+                "patch": self.instance.get("fix_patch", ""),
+            },
+            "setup_info": {
+                "repo_path": self.repo_path,
+            },
+            "multi_swe_info": {
+                "org": self.org,
+                "repo": self.repo,
+                "number": self.number,
+                "instance_id": self.task_id,
+            },
+            "multi_swe_instance": self.instance,
+        }
+
+        with open(pjoin(output_dir, "meta.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=4)
+        with open(
+            pjoin(output_dir, "problem_statement.txt"), "w", encoding="utf-8"
+        ) as f:
+            f.write(self.problem_statement)
+        with open(
+            pjoin(output_dir, "developer_patch.diff"), "w", encoding="utf-8"
+        ) as f:
+            f.write(self.instance.get("fix_patch", ""))
+
+    def to_task(self) -> PlainTask:
+        return PlainTask(
+            commit_hash=self.base_commit,
+            local_path=self.repo_path,
+            problem_statement=self.problem_statement,
+        )
+
+
 class RawGithubTask(RawTask):
     """
     Encapsulate everything required to run ACR on a fresh issue from the internet.

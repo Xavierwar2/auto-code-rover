@@ -503,6 +503,78 @@ def extract_swe_bench_input(dir: str):
     return swe_input_file
 
 
+def extract_multi_swe_bench_input(dir: str):
+    """
+    Collect extracted patches and write the JSONL format expected by
+    Multi-SWE-bench:
+
+        {"org": "...", "repo": "...", "number": 123, "fix_patch": "diff ..."}
+
+    Returns:
+        - path to Multi-SWE-bench prediction file.
+    """
+    applicable_res_dir = pjoin(dir, "applicable_patch")
+    task_dirs = [
+        x
+        for x in os.listdir(applicable_res_dir)
+        if os.path.isdir(pjoin(applicable_res_dir, x))
+    ]
+    task_dirs = [pjoin(applicable_res_dir, x) for x in task_dirs]
+
+    diff_files = []
+    for x in task_dirs:
+        selection_file = Path(x, "selected_patch.json")
+        if selection_file.is_file():
+            diff_file = pjoin(
+                x, json.loads(selection_file.read_text())["selected_patch"]
+            )
+        else:
+            _, diff_file = read_extract_status(x)
+        diff_files.append(diff_file)
+
+    diff_files = [os.path.abspath(x) for x in diff_files]
+    diff_files = [x for x in diff_files if os.path.isfile(x)]
+
+    all_results = []
+    for diff_file in diff_files:
+        task_dir = os.path.dirname(diff_file)
+        meta_file = pjoin(task_dir, "meta.json")
+        with open(meta_file) as f:
+            meta = json.load(f)
+
+        multi_swe_info = meta.get("multi_swe_info")
+        if not multi_swe_info:
+            raise ValueError(
+                f"{meta_file} does not contain multi_swe_info; "
+                "cannot create Multi-SWE-bench predictions."
+            )
+
+        diff_content = Path(diff_file).read_text()
+        if not diff_content:
+            continue
+
+        all_results.append(
+            {
+                "org": multi_swe_info["org"],
+                "repo": multi_swe_info["repo"],
+                "number": multi_swe_info["number"],
+                "fix_patch": diff_content,
+            }
+        )
+
+    multi_swe_input_file = pjoin(dir, "predictions_for_multi_swe_bench.jsonl")
+    with open(multi_swe_input_file, "w") as f:
+        for result in all_results:
+            f.write(json.dumps(result) + "\n")
+
+    return multi_swe_input_file
+
+
+def organize_and_form_multi_swe_input(expr_dir: str):
+    organize_experiment_results(expr_dir)
+    return extract_multi_swe_bench_input(expr_dir)
+
+
 def is_valid_json(json_str: str) -> tuple[ExtractStatus, list | dict | None]:
     """
     Check whether a json string is valid.

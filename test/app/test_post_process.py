@@ -250,6 +250,44 @@ def test_extract_swe_bench_input(tmp_path, monkeypatch):
     assert result["model_name_or_path"] == "dummy-model"
 
 
+def test_extract_multi_swe_bench_input(tmp_path):
+    expr_dir = tmp_path / "expr"
+    expr_dir.mkdir()
+    applicable_dir = expr_dir / "applicable_patch"
+    applicable_dir.mkdir()
+    task_dir = applicable_dir / "darkreader__darkreader-7241"
+    task_dir.mkdir()
+
+    meta = {
+        "task_id": "darkreader__darkreader-7241",
+        "multi_swe_info": {
+            "org": "darkreader",
+            "repo": "darkreader",
+            "number": 7241,
+            "instance_id": "darkreader__darkreader-7241",
+        },
+    }
+    (task_dir / "meta.json").write_text(json.dumps(meta))
+    (task_dir / "selected_patch.json").write_text(
+        json.dumps({"selected_patch": "extracted.diff"})
+    )
+    (task_dir / "extracted.diff").write_text("diff --git a/file.ts b/file.ts\n")
+
+    output_file = pp.extract_multi_swe_bench_input(str(expr_dir))
+
+    predictions_file = Path(output_file)
+    assert predictions_file.name == "predictions_for_multi_swe_bench.jsonl"
+    lines = predictions_file.read_text().splitlines()
+    assert len(lines) == 1
+    result = json.loads(lines[0])
+    assert result == {
+        "org": "darkreader",
+        "repo": "darkreader",
+        "number": 7241,
+        "fix_patch": "diff --git a/file.ts b/file.ts\n",
+    }
+
+
 # =============================================================================
 # Test for extract_organize_and_form_input (wrapper)
 # =============================================================================

@@ -7,7 +7,7 @@ from contextlib import nullcontext
 import pytest
 
 # Import the classes under test. Adjust the import path as needed.
-from app.raw_tasks import RawSweTask, RawGithubTask, RawLocalTask
+from app.raw_tasks import RawSweTask, RawGithubTask, RawLocalTask, RawMultiSweTask
 from app.task import PlainTask, SweTask
 from app import utils as app_utils
 
@@ -81,6 +81,56 @@ def test_raw_swe_task_to_task_and_dump_meta(tmp_path, dummy_swe_task_data):
 
     assert ps_file.read_text() == task_info["problem_statement"]
     assert patch_file.read_text() == task_info["patch"]
+
+
+###############################################################################
+# Tests for RawMultiSweTask
+###############################################################################
+def test_raw_multi_swe_task_to_task_and_dump_meta(tmp_path):
+    repo_dir = tmp_path / "repos"
+    repo_dir.mkdir()
+    repo_path = repo_dir / "darkreader__darkreader"
+    repo_path.mkdir()
+    instance = {
+        "org": "darkreader",
+        "repo": "darkreader",
+        "number": 7241,
+        "title": "Fix parser",
+        "body": "Fixes #7238.",
+        "base": {"sha": "abc123"},
+        "resolved_issues": [
+            {"number": 7238, "title": "Bug title", "body": "Bug body"}
+        ],
+        "fix_patch": "diff --git a/file.ts b/file.ts\n",
+        "test_patch": "",
+        "instance_id": "darkreader__darkreader-7241",
+        "hints": "hint text",
+    }
+
+    raw_task = RawMultiSweTask(instance, str(repo_dir), clone=False)
+    assert raw_task.task_id == "darkreader__darkreader-7241"
+    assert "Fix parser" in raw_task.problem_statement
+    assert "Bug body" in raw_task.problem_statement
+    assert "hint text" in raw_task.problem_statement
+
+    task_obj = raw_task.to_task()
+    assert isinstance(task_obj, PlainTask)
+    assert task_obj.commit_hash == "abc123"
+    assert task_obj.local_path == str(repo_path)
+
+    output_dir = tmp_path / "multi_swe_output"
+    output_dir.mkdir()
+    raw_task.dump_meta_data(str(output_dir))
+
+    meta = json.loads((output_dir / "meta.json").read_text())
+    assert meta["task_id"] == "darkreader__darkreader-7241"
+    assert meta["multi_swe_info"] == {
+        "org": "darkreader",
+        "repo": "darkreader",
+        "number": 7241,
+        "instance_id": "darkreader__darkreader-7241",
+    }
+    assert (output_dir / "developer_patch.diff").read_text() == instance["fix_patch"]
 
 
 ###############################################################################

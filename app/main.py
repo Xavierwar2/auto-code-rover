@@ -28,10 +28,17 @@ from app.model.register import register_all_models
 from app.post_process import (
     extract_organize_and_form_input,
     get_final_patch_path,
+    organize_and_form_multi_swe_input,
     organize_and_form_input,
     reextract_organize_and_form_inputs,
 )
-from app.raw_tasks import RawGithubTask, RawLocalTask, RawSweTask, RawTask
+from app.raw_tasks import (
+    RawGithubTask,
+    RawLocalTask,
+    RawMultiSweTask,
+    RawSweTask,
+    RawTask,
+)
 from app.task import SweTask, Task
 
 
@@ -46,6 +53,11 @@ def main():
         "swe-bench", help="Run one or multiple swe-bench tasks"
     )
     set_swe_parser_args(swe_parser)
+
+    multi_swe_parser = subparsers.add_parser(
+        "multi-swe-bench", help="Run one or multiple Multi-SWE-bench tasks"
+    )
+    set_multi_swe_parser_args(multi_swe_parser)
 
     github_parser = subparsers.add_parser(
         "github-issue",
@@ -117,7 +129,20 @@ def main():
         config.reproduce_and_review = args.reproduce_and_review
 
         groups = group_swe_tasks_by_env(tasks)
-        run_task_groups(groups, num_processes, organize_output=True)
+        run_task_groups(groups, num_processes, organize_output="swe-bench")
+    elif subcommand == "multi-swe-bench":
+        repo_dir = abspath(args.repo_dir)
+        tasks = make_multi_swe_tasks(
+            args.dataset_file,
+            repo_dir,
+            args.task,
+            args.task_list_file,
+            args.org,
+            args.repo,
+            not args.no_clone,
+        )
+        groups = group_multi_swe_tasks_by_repo(tasks)
+        run_task_groups(groups, num_processes, organize_output="multi-swe-bench")
     elif subcommand == "github-issue":
         setup_dir = args.setup_dir
         if setup_dir is not None:
@@ -188,6 +213,36 @@ def set_swe_parser_args(parser: ArgumentParser) -> None:
         action="store_true",
         default=False,
         help="Perform some analysis on the experiment result and exit.",
+    )
+
+
+def set_multi_swe_parser_args(parser: ArgumentParser) -> None:
+    add_task_related_args(parser)
+    parser.add_argument(
+        "--dataset-file",
+        type=str,
+        required=True,
+        help="Path to a Multi-SWE-bench JSONL dataset file.",
+    )
+    parser.add_argument(
+        "--repo-dir",
+        type=str,
+        required=True,
+        help="Directory where target repositories are cloned or already present.",
+    )
+    parser.add_argument("--task", type=str, help="Instance id to run.")
+    parser.add_argument(
+        "--task-list-file",
+        type=str,
+        help="Path to the file that contains instance ids to run.",
+    )
+    parser.add_argument("--org", type=str, help="Only run records from this org.")
+    parser.add_argument("--repo", type=str, help="Only run records from this repo.")
+    parser.add_argument(
+        "--no-clone",
+        action="store_true",
+        default=False,
+        help="Do not clone missing repositories; require them to exist in --repo-dir.",
     )
 
 
@@ -350,6 +405,49 @@ def make_swe_tasks(
     return all_tasks
 
 
+def make_multi_swe_tasks(
+    dataset_file: str,
+    repo_dir: str,
+    task_id: str | None,
+    task_list_file: str | None,
+    org: str | None,
+    repo: str | None,
+    clone: bool = True,
+) -> list[RawMultiSweTask]:
+    if task_id is not None and task_list_file is not None:
+        raise ValueError("Cannot specify both task and task-list.")
+
+    selected_task_ids = None
+    if task_list_file is not None:
+        selected_task_ids = set(parse_task_list_file(task_list_file))
+    if task_id is not None:
+        selected_task_ids = {task_id}
+
+    with open(dataset_file, encoding="utf-8") as f:
+        instances = [json.loads(line) for line in f if line.strip()]
+
+    filtered_instances = []
+    for instance in instances:
+        if (
+            selected_task_ids is not None
+            and instance["instance_id"] not in selected_task_ids
+        ):
+            continue
+        if org is not None and instance["org"] != org:
+            continue
+        if repo is not None and instance["repo"] != repo:
+            continue
+        filtered_instances.append(instance)
+
+    if not filtered_instances:
+        raise ValueError("No Multi-SWE-bench instances matched the filters.")
+
+    return [
+        RawMultiSweTask(instance, repo_dir=repo_dir, clone=clone)
+        for instance in filtered_instances
+    ]
+
+
 def parse_task_list_file(task_list_file: str) -> list[str]:
     """
     Parse the task list file.
@@ -370,10 +468,22 @@ def group_swe_tasks_by_env(tasks: list[RawSweTask]) -> dict[str, list[RawSweTask
     return groups
 
 
+def group_multi_swe_tasks_by_repo(
+    tasks: list[RawMultiSweTask],
+) -> dict[str, list[RawMultiSweTask]]:
+    groups = {}
+    for task in tasks:
+        key = f"{task.org}/{task.repo}"
+        if key not in groups:
+            groups[key] = []
+        groups[key].append(task)
+    return groups
+
+
 def run_task_groups(
     task_groups: Mapping[str, Sequence[RawTask]],
     num_processes: int,
-    organize_output: bool = False,
+    organize_output: str | None = None,
 ):
     """
     Main entry for running tasks.
@@ -402,11 +512,17 @@ def run_task_groups(
         log.print_with_time("Only saving SBFL results. Exiting.")
         return
 
-    if organize_output:
+    if organize_output == "swe-bench":
         # post-process completed experiments to get input file to SWE-bench
         log.print_with_time("Post-processing completed experiment results.")
         swe_input_file = organize_and_form_input(config.output_dir)
         log.print_with_time(f"SWE-Bench input file created: {swe_input_file}")
+    elif organize_output == "multi-swe-bench":
+        log.print_with_time("Post-processing completed experiment results.")
+        multi_swe_input_file = organize_and_form_multi_swe_input(config.output_dir)
+        log.print_with_time(
+            f"Multi-SWE-bench input file created: {multi_swe_input_file}"
+        )
 
 
 def run_tasks_serial(tasks: list[RawTask]) -> None:
