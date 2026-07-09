@@ -10,7 +10,10 @@ from litellm.utils import Choices, Message, ModelResponse
 from openai import BadRequestError
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
+from app.env import load_project_env
 from app.log import log_and_cprint, log_and_print
+
+load_project_env()
 
 # Variables for each process. Since models are singleton objects, their references are copied
 # to each process, but they all point to the same objects. For safe updating costs per process,
