@@ -217,6 +217,19 @@ def extract_diff_one_instance(
     return status, summary
 
 
+def should_checkout_base_for_extraction(
+    meta: Mapping, standalone_mode: bool = False
+) -> bool:
+    if standalone_mode:
+        return True
+
+    setup_info = meta.get("setup_info", {})
+    # SWE-bench setup commits test-suite changes after checking out the base
+    # commit. Plain tasks, including Multi-SWE-bench, do not have that extra
+    # commit and should always extract patches against their recorded base.
+    return "env_name" not in setup_info
+
+
 # TODO: move this to PatchWriter
 def convert_response_to_diff(
     response: str, task_dir: str, standalone_mode: bool = False
@@ -260,13 +273,13 @@ def convert_response_to_diff(
 
     # (3) edit parsed. check whether it can match the original program
     with apputils.cd(repo_path):
-        if standalone_mode:
-            # in special --extract-patch mode
+        if should_checkout_base_for_extraction(meta, standalone_mode):
+            # In special --extract-patch mode, and for PlainTask-based workflows
+            # such as Multi-SWE-bench, match patches against the recorded base.
             apputils.repo_reset_and_clean_checkout(base_commit)
         else:
-            # extracting patch in the write_patch loop
-            # we should not reset to base commit, because previous we created a new commit
-            # containing the test_patch content. We should just clean the changes until HEAD.
+            # SWE-bench write_patch extraction should keep the temporary commit
+            # containing test_patch changes and only clean active modifications.
             apputils.repo_clean_changes()
         # try to match and apply each edit
         unmatched_edit_indexes = []

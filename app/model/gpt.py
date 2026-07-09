@@ -7,6 +7,10 @@ import os
 import sys
 from typing import Literal, cast
 
+from app.env import load_project_env
+
+load_project_env()
+
 from litellm import NotGiven
 from loguru import logger
 from openai import NOT_GIVEN, BadRequestError, OpenAI

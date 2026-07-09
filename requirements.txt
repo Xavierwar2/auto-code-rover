@@ -97,6 +97,7 @@ rpds-py==0.16.2
 semver==3.0.2
 slack_sdk==3.26.2
 sniffio==1.3.0
+socksio==1.0.0
 soupsieve==2.5
 sympy==1.13.0
 tenacity==8.2.3

@@ -114,6 +114,20 @@ def test_is_valid_json():
 # =============================================================================
 # Test for convert_response_to_diff
 # =============================================================================
+def test_should_checkout_base_for_plain_and_multi_swe_extraction():
+    plain_meta = {"setup_info": {"repo_path": "/repo"}}
+    multi_swe_meta = {
+        "setup_info": {"repo_path": "/repo", "language": "typescript"},
+        "multi_swe_info": {"instance_id": "darkreader__darkreader-7241"},
+    }
+    swe_meta = {"setup_info": {"repo_path": "/repo", "env_name": "test-env"}}
+
+    assert pp.should_checkout_base_for_extraction(plain_meta)
+    assert pp.should_checkout_base_for_extraction(multi_swe_meta)
+    assert pp.should_checkout_base_for_extraction(swe_meta, standalone_mode=True)
+    assert not pp.should_checkout_base_for_extraction(swe_meta)
+
+
 def test_convert_response_to_diff(monkeypatch, tmp_path):
     import app.post_process as pp
     from app.post_process import ExtractStatus
@@ -174,6 +188,47 @@ def test_convert_response_to_diff(monkeypatch, tmp_path):
         status == ExtractStatus.APPLICABLE_PATCH
     ), f"Expected APPLICABLE_PATCH, got {status}"
     assert diff == "dummy diff"
+
+
+def test_convert_response_to_diff_resets_plain_task_to_base(monkeypatch, tmp_path):
+    task_dir = tmp_path / "task_dir"
+    task_dir.mkdir()
+    meta = {
+        "task_info": {"base_commit": "base-sha"},
+        "setup_info": {"repo_path": str(task_dir), "language": "typescript"},
+        "multi_swe_info": {"instance_id": "darkreader__darkreader-7241"},
+    }
+    (task_dir / "meta.json").write_text(json.dumps(meta))
+
+    class DummyEdit:
+        filename = "dummy_file.ts"
+        before = "old code"
+
+    reset_commits = []
+    monkeypatch.setattr(pp, "parse_edits", lambda patch: [DummyEdit()])
+    monkeypatch.setattr(pp, "is_test_file", lambda filename: False)
+    monkeypatch.setattr(
+        pp.apputils,
+        "repo_reset_and_clean_checkout",
+        lambda commit: reset_commits.append(commit),
+    )
+    monkeypatch.setattr(pp.apputils, "repo_clean_changes", lambda: None)
+    monkeypatch.setattr(
+        pp.apputils, "find_file", lambda repo, target: str(Path(repo) / target)
+    )
+    monkeypatch.setattr(pp, "apply_edit", lambda edit, found_file: found_file)
+
+    class DummyCompletedProcess:
+        stdout = b"dummy diff"
+
+    monkeypatch.setattr(
+        pp.apputils, "run_command", lambda cmd, **kwargs: DummyCompletedProcess()
+    )
+
+    status, _, _ = pp.convert_response_to_diff("patch", str(task_dir))
+
+    assert status == ExtractStatus.APPLICABLE_PATCH
+    assert reset_commits == ["base-sha"]
 
 
 # =============================================================================

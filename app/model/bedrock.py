@@ -6,6 +6,10 @@ import os
 import sys
 from typing import Literal
 
+from app.env import load_project_env
+
+load_project_env()
+
 import litellm
 
 try:
