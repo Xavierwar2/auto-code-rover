@@ -84,6 +84,66 @@ def test_find_python_files(tmp_path):
         assert actual == expected, f"Expected {expected}, but got {actual}."
 
 
+def test_find_javascript_files(tmp_path):
+    base_dir = tmp_path / "files"
+    base_dir.mkdir()
+    files = [
+        "src/main.ts",
+        "src/view.tsx",
+        "src/helpers.js",
+        "src/widget.jsx",
+        "src/widget.test.ts",
+        "tests/view.ts",
+        "node_modules/pkg/index.js",
+        "src/style.css",
+    ]
+    for file in files:
+        file_path = base_dir / file
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("")
+
+    found = find_javascript_files(str(base_dir))
+    found_rel = sorted(os.path.relpath(path, str(base_dir)) for path in found)
+
+    assert found_rel == [
+        os.path.join("src", "helpers.js"),
+        os.path.join("src", "main.ts"),
+        os.path.join("src", "view.tsx"),
+        os.path.join("src", "widget.jsx"),
+    ]
+
+
+def test_parse_javascript_file(tmp_path):
+    source = textwrap.dedent(
+        """\
+        export class Parser extends BaseParser {
+            parse(text: string): string {
+                return text.trim();
+            }
+        }
+
+        export function indexSitesFixesConfig<T>(text: string) {
+            const delimiterRegex = /\\s*={2,}\\s*/gm;
+            return text.match(delimiterRegex);
+        }
+
+        const createUrlRegex = (url: string) => new RegExp(url);
+        """
+    )
+    ts_file = tmp_path / "parse.ts"
+    ts_file.write_text(source)
+
+    result = parse_javascript_file(str(ts_file))
+    assert result is not None
+    classes, class_to_funcs, top_level_funcs, class_relation_map = result
+
+    assert classes == [("Parser", 1, 5)]
+    assert class_to_funcs["Parser"] == [("parse", 2, 4)]
+    assert ("indexSitesFixesConfig", 7, 10) in top_level_funcs
+    assert ("createUrlRegex", 12, 12) in top_level_funcs
+    assert class_relation_map[("Parser", 1, 5)] == ["BaseParser"]
+
+
 def test_parse_class_def_args_simple():
     source = "class Foo(B, object):\n    pass\n"
     tree = ast.parse(source)

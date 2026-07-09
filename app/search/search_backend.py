@@ -1,9 +1,9 @@
 from collections import defaultdict, namedtuple
 from collections.abc import MutableMapping
 from functools import cache
+import os
 from pathlib import Path
 
-import timeout_decorator
 from loguru import logger
 
 from app.data_structures import BugLocation, SearchResult
@@ -25,7 +25,7 @@ RESULT_SHOW_LIMIT = 3
 class SearchBackend:
     def __init__(self, project_path: str):
         self.project_path = project_path
-        # list of all files ending with .py, which are likely not test files
+        # List of supported source files, which are likely not test files.
         # These are all ABSOLUTE paths.
         self.parsed_files: list[str] = []
 
@@ -56,6 +56,7 @@ class SearchBackend:
         This is for fast lookup whenever we receive a query.
         """
         self._update_indices(*self._build_python_index(self.project_path))
+        self._update_indices(*self._build_javascript_index(self.project_path))
 
     def _update_indices(
         self,
@@ -120,6 +121,50 @@ class SearchBackend:
             function_index,
             class_relation_index,
             parsed_py_files,
+        )
+
+    @classmethod
+    @cache
+    def _build_javascript_index(cls, project_path: str) -> tuple[
+        ClassIndexType,
+        ClassFuncIndexType,
+        FuncIndexType,
+        ClassRelationIndexType,
+        list[str],
+    ]:
+        class_index: ClassIndexType = defaultdict(list)
+        class_func_index: ClassFuncIndexType = defaultdict(lambda: defaultdict(list))
+        function_index: FuncIndexType = defaultdict(list)
+        class_relation_index: ClassRelationIndexType = defaultdict(list)
+
+        js_files = search_utils.find_javascript_files(project_path)
+        parsed_js_files = []
+        for js_file in js_files:
+            file_info = search_utils.parse_javascript_file(js_file)
+            if file_info is None:
+                continue
+            parsed_js_files.append(js_file)
+            classes, class_to_funcs, top_level_funcs, class_relation_map = file_info
+
+            for c, start, end in classes:
+                class_index[c].append((js_file, LineRange(start, end)))
+
+            for c, class_funcs in class_to_funcs.items():
+                for f, start, end in class_funcs:
+                    class_func_index[c][f].append((js_file, LineRange(start, end)))
+
+            for f, start, end in top_level_funcs:
+                function_index[f].append((js_file, LineRange(start, end)))
+
+            for (c, start, end), super_classes in class_relation_map.items():
+                class_relation_index[c] = super_classes
+
+        return (
+            class_index,
+            class_func_index,
+            function_index,
+            class_relation_index,
+            parsed_js_files,
         )
 
     def _file_line_to_class_and_func(
@@ -219,13 +264,15 @@ class SearchBackend:
         Returns:
             - all matched files, in abs path.
         """
-        parsed_files_lower = [f.lower() for f in self.parsed_files]
-        parsed_files = zip(self.parsed_files, parsed_files_lower)
-        target_lower = target_file_name.lower()
+        def normalize_path(path: str) -> str:
+            return path.replace("\\", "/").lower()
 
         candidates = []
-        for orig_file, lower_file in parsed_files:
-            if lower_file.endswith(target_lower):
+        target_lower = normalize_path(target_file_name)
+        for orig_file in self.parsed_files:
+            lower_file = normalize_path(orig_file)
+            rel_file = normalize_path(os.path.relpath(orig_file, self.project_path))
+            if lower_file.endswith(target_lower) or rel_file.endswith(target_lower):
                 candidates.append(orig_file)
         return candidates
 
@@ -291,7 +338,10 @@ class SearchBackend:
 
         for fname, (start, end) in self.class_index[class_name]:
             # there are some classes; we return their signatures
-            code = search_utils.get_class_signature(fname, class_name)
+            if fname.endswith(".py"):
+                code = search_utils.get_class_signature(fname, class_name)
+            else:
+                code = search_utils.get_code_snippets(fname, start, end)
             res = SearchResult(fname, start, end, class_name, None, code)
             search_res.append(res)
 
@@ -477,7 +527,6 @@ class SearchBackend:
         return tool_output, final_search_res, True
 
     @catch_all_and_log
-    @timeout_decorator.timeout(120)
     def search_code(self, code_str: str) -> tuple[str, list[SearchResult], bool]:
         """Search for a code snippet in the entire codebase.
 
@@ -540,14 +589,14 @@ class SearchBackend:
         """
         code_str = code_str.removesuffix(")")
 
-        candidate_py_files = [f for f in self.parsed_files if f.endswith(file_name)]
-        if not candidate_py_files:
+        candidate_files = self._get_candidate_matched_py_files(file_name)
+        if not candidate_files:
             tool_output = f"Could not find file {file_name} in the codebase."
             return tool_output, [], False
 
         # start searching for code in the filtered files
         search_res: list[SearchResult] = []
-        for file_path in candidate_py_files:
+        for file_path in candidate_files:
             searched_line_and_code: list[tuple[int, str]] = (
                 search_utils.get_code_region_containing_code(file_path, code_str)
             )
@@ -661,15 +710,15 @@ class SearchBackend:
             - file_name: relevant path to the file.
         """
         # check whether we can get the file
-        candidate_py_files = [f for f in self.parsed_files if f.endswith(file_name)]
-        if not candidate_py_files:
+        candidate_files = self._get_candidate_matched_py_files(file_name)
+        if not candidate_files:
             tool_output = f"Could not find file {file_name} in the codebase."
             return tool_output, [], False
 
         # NOTE: sometimes there can be multiple files.
         # To make the execution safe, we just take the first one
 
-        file_path = candidate_py_files[0]
+        file_path = candidate_files[0]
         file_content = Path(file_path).read_text()
 
         file_length = len(file_content.splitlines())

@@ -177,6 +177,58 @@ class TestSearchBackend:
             # (5) Parsed files should list our sample file.
             assert parsed_py_files == [sample_file]
 
+    def test_build_javascript_index_and_search_typescript(self, tmp_path):
+        SearchBackend._build_python_index.cache_clear()
+        SearchBackend._build_javascript_index.cache_clear()
+
+        src_dir = tmp_path / "src" / "generators" / "utils"
+        src_dir.mkdir(parents=True)
+        parse_file = src_dir / "parse.ts"
+        parse_file.write_text(
+            textwrap.dedent(
+                """\
+                export function indexSitesFixesConfig<T>(text: string) {
+                    let recordStart = 0;
+                    const delimiterRegex = /\\s*={2,}\\s*/gm;
+                    return recordStart + text.length;
+                }
+                """
+            )
+        )
+
+        sb = SearchBackend(project_path=str(tmp_path))
+
+        assert str(parse_file) in sb.parsed_files
+        output, search_res, ok = sb.search_method("indexSitesFixesConfig")
+        assert ok is True
+        assert "src/generators/utils/parse.ts" in output.replace("\\", "/")
+        assert "delimiterRegex" in search_res[0].code
+
+        output, search_res, ok = sb.search_code("delimiterRegex")
+        assert ok is True
+        assert "delimiterRegex" in output
+
+        output, _, ok = sb.get_code_around_line(
+            "src/generators/utils/parse.ts", 3, 1
+        )
+        assert ok is True
+        assert "const delimiterRegex" in output
+
+    def test_candidate_matching_normalizes_js_ts_paths(self, tmp_path):
+        SearchBackend._build_python_index.cache_clear()
+        SearchBackend._build_javascript_index.cache_clear()
+
+        file_path = tmp_path / "src" / "utils" / "url.ts"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(
+            "export function createUrlRegex(url: string) { return url; }\n"
+        )
+
+        sb = SearchBackend(project_path=str(tmp_path))
+        candidates = sb._get_candidate_matched_py_files("src/utils/url.ts")
+
+        assert candidates == [str(file_path)]
+
     def test_file_line_to_class_and_func(self):
         dummy_file = "dummy.py"
 
