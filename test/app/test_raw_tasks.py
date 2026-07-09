@@ -164,6 +164,28 @@ def test_raw_multi_swe_task_accepts_legacy_repo_path(tmp_path):
     assert raw_task.repo_path == str(legacy_repo_path)
 
 
+def test_raw_multi_swe_task_prefers_per_instance_repo_path(tmp_path):
+    repo_dir = tmp_path / "repos"
+    shared_repo_path = repo_dir / "darkreader" / "darkreader"
+    instance_repo_path = shared_repo_path / "7241"
+    instance_repo_path.mkdir(parents=True)
+    instance = {
+        "org": "darkreader",
+        "repo": "darkreader",
+        "number": 7241,
+        "title": "Fix parser",
+        "body": "Bug body",
+        "base": {"sha": "abc123"},
+        "fix_patch": "",
+        "instance_id": "darkreader__darkreader-7241",
+    }
+
+    raw_task = RawMultiSweTask(instance, str(repo_dir), clone=False)
+
+    assert raw_task.repo_path == str(instance_repo_path)
+    assert raw_task.to_task().local_path == str(instance_repo_path)
+
+
 ###############################################################################
 # Tests for RawGithubTask
 ###############################################################################

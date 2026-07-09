@@ -108,19 +108,14 @@ class RawMultiSweTask(RawTask):
         self.base_commit = instance["base"]["sha"]
         self.language = language or instance.get("language")
         self.test_cmd = test_cmd or instance.get("test_cmd")
-        self.repo_path = pjoin(repo_dir, self.org, self.repo)
+        self.shared_repo_path = pjoin(repo_dir, self.org, self.repo)
+        self.instance_repo_path = pjoin(self.shared_repo_path, str(self.number))
         self.legacy_repo_path = pjoin(repo_dir, f"{self.org}__{self.repo}")
+        self.repo_path = self.resolve_repo_path()
         self.problem_statement = self.make_problem_statement(instance)
         if clone:
             self.ensure_repo()
         elif not Path(self.repo_path).exists():
-            if Path(self.legacy_repo_path).exists():
-                log_and_print(
-                    f"Repository {self.repo_path} does not exist; using legacy path "
-                    f"{self.legacy_repo_path}."
-                )
-                self.repo_path = self.legacy_repo_path
-                return
             raise FileNotFoundError(
                 f"Repository {self.repo_path} does not exist and cloning is disabled."
             )
@@ -148,6 +143,26 @@ class RawMultiSweTask(RawTask):
         if hints:
             parts.append(f"\nHints:\n{hints}")
         return "\n".join(parts).strip()
+
+    def resolve_repo_path(self) -> str:
+        if Path(self.instance_repo_path).exists():
+            log_and_print(
+                f"Using per-instance repository for {self.task_id}: "
+                f"{self.instance_repo_path}."
+            )
+            return self.instance_repo_path
+
+        if Path(self.shared_repo_path).exists():
+            return self.shared_repo_path
+
+        if Path(self.legacy_repo_path).exists():
+            log_and_print(
+                f"Repository {self.shared_repo_path} does not exist; using legacy path "
+                f"{self.legacy_repo_path}."
+            )
+            return self.legacy_repo_path
+
+        return self.shared_repo_path
 
     def ensure_repo(self) -> None:
         repo_path = Path(self.repo_path)
