@@ -19,11 +19,11 @@ fi
 MULTI_SWE_ROOT="${MULTI_SWE_ROOT:-$ACR_ROOT}"
 
 # 数据集文件。TypeScript 的 darkreader 数据集通常位于 data/ts 下。
-DATASET_FILE="${DATASET_FILE:-$MULTI_SWE_ROOT/data/ts/darkreader__darkreader_dataset.jsonl}"
+DATASET_FILE="${DATASET_FILE:-$MULTI_SWE_ROOT/repos/darkreader__darkreader_dataset.jsonl}"
 
 # 目标仓库根目录。ACR 会按 <org>/<repo> 结构查找或克隆仓库，
 # 例如 darkreader 会放在：$REPO_DIR/darkreader/darkreader
-REPO_DIR="${REPO_DIR:-$MULTI_SWE_ROOT/data/repos}"
+REPO_DIR="${REPO_DIR:-$MULTI_SWE_ROOT/repos}"
 
 # 输出目录。每次运行的中间文件、日志和最终 predictions 都会写到这里。
 OUTPUT_DIR="${OUTPUT_DIR:-$ACR_ROOT/results/acr_darkreader_test}"
@@ -35,7 +35,7 @@ MODEL="${MODEL:-gpt-5.4}"
 MODEL_TEMPERATURE="${MODEL_TEMPERATURE:-0.2}"
 
 # 项目语言。留空时 ACR 会根据 dataset 路径中的 ts/js/py 自动推断。
-LANGUAGE="${LANGUAGE:-}"
+LANGUAGE="${LANGUAGE:-typescript}"
 
 # 可选验证命令。启用 --enable-validation 时会在应用补丁后运行。
 # 对 darkreader 可按你的环境改成 npm test、npm run test、pnpm test 等。
