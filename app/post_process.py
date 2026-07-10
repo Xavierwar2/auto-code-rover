@@ -230,6 +230,120 @@ def should_checkout_base_for_extraction(
     return "env_name" not in setup_info
 
 
+def repo_has_commit(repo_path: Path, commit_hash: str) -> bool:
+    try:
+        cp = subprocess.run(
+            ["git", "cat-file", "-e", f"{commit_hash}^{{commit}}"],
+            cwd=repo_path,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return cp.returncode == 0
+
+
+def is_git_worktree(repo_path: Path) -> bool:
+    try:
+        cp = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if cp.returncode != 0:
+        return False
+    return Path(cp.stdout.strip()).resolve() == repo_path.resolve()
+
+
+def resolve_repo_path_for_extraction(meta: Mapping) -> str:
+    setup_info = meta["setup_info"]
+    repo_path = Path(setup_info["repo_path"])
+    base_commit = meta.get("task_info", {}).get("base_commit")
+    multi_swe_info = meta.get("multi_swe_info")
+
+    if not multi_swe_info:
+        return str(repo_path)
+
+    def can_use(candidate: Path) -> bool:
+        if not candidate.is_dir() or not is_git_worktree(candidate):
+            return False
+        return not base_commit or repo_has_commit(candidate, base_commit)
+
+    number = multi_swe_info.get("number")
+    instance_id = multi_swe_info.get("instance_id", "")
+    if number is None and "-" in instance_id:
+        number = instance_id.rpartition("-")[2]
+
+    if number is None:
+        if can_use(repo_path):
+            return str(repo_path)
+        raise RuntimeError(f"No usable repository found for extraction: {repo_path}")
+
+    number = str(number)
+    candidates: list[Path] = []
+    fallback_candidates: list[Path] = []
+
+    if repo_path.name == number:
+        candidates.append(repo_path)
+    else:
+        candidates.append(repo_path / number)
+        fallback_candidates.append(repo_path)
+
+    org = multi_swe_info.get("org")
+    repo = multi_swe_info.get("repo")
+    if org and repo:
+        if repo_path.name == f"{org}__{repo}":
+            candidates.append(repo_path.parent / org / repo / number)
+
+        project_root = Path(__file__).resolve().parents[1]
+        candidates.append(project_root / "repos" / org / repo / number)
+
+        for root in [Path.cwd(), *Path.cwd().parents]:
+            candidates.append(root / "repos" / org / repo / number)
+
+    candidates.extend(fallback_candidates)
+
+    seen: set[str] = set()
+    logger.info(
+        "Resolving repository for patch extraction. project_root={}, setup_repo={}, "
+        "multi_swe_info={}",
+        Path(__file__).resolve().parents[1],
+        repo_path,
+        multi_swe_info,
+    )
+    for candidate in candidates:
+        candidate_str = str(candidate)
+        if candidate_str in seen:
+            continue
+        seen.add(candidate_str)
+        if not candidate.is_dir() or not is_git_worktree(candidate):
+            logger.info(
+                "Skipping repository candidate because it is missing or not a git root: {}",
+                candidate,
+            )
+            continue
+        if base_commit and not repo_has_commit(candidate, base_commit):
+            logger.info(
+                "Skipping per-instance repository without base commit {}: {}",
+                base_commit,
+                candidate,
+            )
+            continue
+        logger.info(
+            "Using repository for patch extraction: {}",
+            candidate,
+        )
+        return candidate_str
+
+    raise RuntimeError(f"No usable repository found for extraction: {repo_path}")
+
+
 # TODO: move this to PatchWriter
 def convert_response_to_diff(
     response: str, task_dir: str, standalone_mode: bool = False
@@ -243,8 +357,7 @@ def convert_response_to_diff(
         meta = json.load(f)
 
     task_info = meta["task_info"]
-    setup_info = meta["setup_info"]
-    repo_path = setup_info["repo_path"]  # the project dir
+    repo_path = resolve_repo_path_for_extraction(meta)
     base_commit = task_info["base_commit"]  # the commit to checkout
 
     # if not os.path.isfile(raw_patch_file):
@@ -290,11 +403,26 @@ def convert_response_to_diff(
             # so we need to search for it here
             found_file = apputils.find_file(repo_path, target_file)
             if found_file is None:
+                logger.info(
+                    "Patch edit {} cannot find target file {} under {}",
+                    idx,
+                    target_file,
+                    repo_path,
+                )
                 unmatched_edit_indexes.append(idx)
                 continue
             # try to apply this edit and update the actual file content
             applied_file = apply_edit(edit, found_file)
             if applied_file is None:
+                logger.info(
+                    "Patch edit {} target {} was found as {}, but original snippet "
+                    "did not match after checkout to {}. Original snippet starts with: {}",
+                    idx,
+                    target_file,
+                    found_file,
+                    base_commit,
+                    edit.before.splitlines()[:3],
+                )
                 unmatched_edit_indexes.append(idx)
                 continue
 

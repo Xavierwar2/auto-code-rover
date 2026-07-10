@@ -54,6 +54,22 @@ def test_apply_edit_failure():
     assert result is None
 
 
+def test_apply_edit_skips_python_lint_for_non_python_files():
+    original_content = "const delimiterRegex = /\\s*={2,}\\s*/gm;\n"
+    patched_content = "const delimiterRegex = /^[^\\S\\r\\n]*={2,}[^\\S\\r\\n]*$/gm;"
+    edit = Edit("parse.ts", original_content.strip(), patched_content)
+
+    with NamedTemporaryFile(mode="w+", suffix=".ts", delete=False) as tmp:
+        tmp.write(original_content)
+        tmp_path = tmp.name
+
+    result = apply_edit(edit, tmp_path)
+
+    assert result == tmp_path
+    with open(tmp_path) as f:
+        assert f.read().strip() == patched_content
+
+
 def test_lint_python_content():
     valid_content = "def foo():\n    return True"
     invalid_content = "def foo(\n    return True"

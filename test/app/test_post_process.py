@@ -128,6 +128,119 @@ def test_should_checkout_base_for_plain_and_multi_swe_extraction():
     assert not pp.should_checkout_base_for_extraction(swe_meta)
 
 
+def test_resolve_repo_path_for_extraction_prefers_multi_swe_instance_repo(
+    monkeypatch, tmp_path
+):
+    shared_repo = tmp_path / "repos" / "darkreader" / "darkreader"
+    instance_repo = shared_repo / "7241"
+    instance_repo.mkdir(parents=True)
+    monkeypatch.setattr(pp, "repo_has_commit", lambda repo, commit: True)
+    monkeypatch.setattr(pp, "is_git_worktree", lambda repo: True)
+
+    meta = {
+        "setup_info": {"repo_path": str(shared_repo), "language": "typescript"},
+        "multi_swe_info": {
+            "org": "darkreader",
+            "repo": "darkreader",
+            "number": 7241,
+            "instance_id": "darkreader__darkreader-7241",
+        },
+    }
+
+    assert pp.resolve_repo_path_for_extraction(meta) == str(instance_repo)
+
+
+def test_resolve_repo_path_for_extraction_keeps_non_multi_swe_repo(tmp_path):
+    repo = tmp_path / "repo"
+    meta = {"setup_info": {"repo_path": str(repo)}}
+
+    assert pp.resolve_repo_path_for_extraction(meta) == str(repo)
+
+
+def test_resolve_repo_path_for_extraction_finds_instance_repo_from_cwd(
+    monkeypatch, tmp_path
+):
+    instance_repo = tmp_path / "repos" / "darkreader" / "darkreader" / "7241"
+    instance_repo.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(pp, "__file__", str(tmp_path / "project" / "app" / "post_process.py"))
+    monkeypatch.setattr(pp, "repo_has_commit", lambda repo, commit: True)
+    monkeypatch.setattr(pp, "is_git_worktree", lambda repo: True)
+
+    meta = {
+        "setup_info": {
+            "repo_path": "/root/multi-swe-bench/data/repos/darkreader/darkreader",
+            "language": "typescript",
+        },
+        "multi_swe_info": {
+            "org": "darkreader",
+            "repo": "darkreader",
+            "number": 7241,
+            "instance_id": "darkreader__darkreader-7241",
+        },
+    }
+
+    assert pp.resolve_repo_path_for_extraction(meta) == str(instance_repo)
+
+
+def test_resolve_repo_path_for_extraction_finds_instance_repo_from_project_root(
+    monkeypatch, tmp_path
+):
+    project_root = tmp_path / "auto-code-rover"
+    instance_repo = project_root / "repos" / "darkreader" / "darkreader" / "7241"
+    instance_repo.mkdir(parents=True)
+    other_cwd = tmp_path / "elsewhere"
+    other_cwd.mkdir()
+    monkeypatch.chdir(other_cwd)
+    monkeypatch.setattr(pp, "repo_has_commit", lambda repo, commit: True)
+    monkeypatch.setattr(pp, "is_git_worktree", lambda repo: True)
+    monkeypatch.setattr(pp, "__file__", str(project_root / "app" / "post_process.py"))
+
+    meta = {
+        "setup_info": {
+            "repo_path": "/root/multi-swe-bench/data/repos/darkreader/darkreader",
+            "language": "typescript",
+        },
+        "multi_swe_info": {
+            "org": "darkreader",
+            "repo": "darkreader",
+            "number": 7241,
+            "instance_id": "darkreader__darkreader-7241",
+        },
+    }
+
+    assert pp.resolve_repo_path_for_extraction(meta) == str(instance_repo)
+
+
+def test_resolve_repo_path_for_extraction_skips_instance_without_base_commit(
+    monkeypatch, tmp_path
+):
+    shared_repo = tmp_path / "repos" / "darkreader" / "darkreader"
+    instance_repo = shared_repo / "6747"
+    instance_repo.mkdir(parents=True)
+    base_commit = "a787eb511f45159c8869d30e5a6ba1f91cb67709"
+
+    meta = {
+        "task_info": {"base_commit": base_commit},
+        "setup_info": {"repo_path": str(shared_repo), "language": "typescript"},
+        "multi_swe_info": {
+            "org": "darkreader",
+            "repo": "darkreader",
+            "number": 6747,
+            "instance_id": "darkreader__darkreader-6747",
+        },
+    }
+
+    monkeypatch.setattr(
+        pp,
+        "repo_has_commit",
+        lambda repo, commit: repo == shared_repo and commit == base_commit,
+    )
+    monkeypatch.setattr(pp, "is_git_worktree", lambda repo: True)
+
+    assert pp.resolve_repo_path_for_extraction(meta) == str(shared_repo)
+
+
 def test_convert_response_to_diff(monkeypatch, tmp_path):
     import app.post_process as pp
     from app.post_process import ExtractStatus

@@ -7,12 +7,8 @@ https://github.com/gpt-engineer-org/gpt-engineer/blob/main/gpt_engineer/core/cha
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from pprint import pformat
-from tempfile import NamedTemporaryFile
-from typing import TextIO
-
-from pylint.lint import Run
-from pylint.reporters.text import TextReporter
 
 
 @dataclass
@@ -172,7 +168,9 @@ def apply_edit(edit: Edit, file_path: str) -> str | None:
     fixed_after_lines[1:] = after_lines[1:]
     new_prog_2 = prefix + "\n".join(fixed_after_lines) + "\n" + suffix
 
-    if lint_python_content(new_prog_1):
+    if Path(file_path).suffix != ".py":
+        new_prog = new_prog_1
+    elif lint_python_content(new_prog_1):
         new_prog = new_prog_1
     elif lint_python_content(new_prog_2):
         new_prog = new_prog_2
@@ -185,20 +183,6 @@ def apply_edit(edit: Edit, file_path: str) -> str | None:
     return file_path
 
 
-class Writable(TextIO):
-    "dummy output stream for pylint"
-
-    def __init__(self) -> None:
-        self.content: list[str] = []
-
-    def write(self, s: str) -> int:
-        self.content.append(s)
-        return len(s)
-
-    def read(self, n: int = 0) -> str:
-        return "\n".join(self.content)
-
-
 def lint_python_content(content: str) -> bool:
     """Check if python content lints OK.
 
@@ -208,12 +192,8 @@ def lint_python_content(content: str) -> bool:
     Returns: True if the contents passes linting, False otherwise.
 
     """
-    pylint_out = Writable()
-    reporter = TextReporter(pylint_out)
-
-    with NamedTemporaryFile(buffering=0) as f:
-        f.write(content.encode())
-
-        _ = Run(["--errors-only", f.name], reporter=reporter, exit=False)
-
-    return not any(error.endswith("(syntax-error)") for error in pylint_out.content)
+    try:
+        compile(content, "<patch>", "exec")
+    except SyntaxError:
+        return False
+    return True
